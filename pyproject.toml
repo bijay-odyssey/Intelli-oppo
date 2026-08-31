@@ -1,0 +1,37 @@
+[project]
+name = "intelli-oppo"
+version = "0.1.0"
+description = "A debate engine that always takes the opposing position, using only sound logic."
+requires-python = ">=3.12"
+dependencies = [
+    "groq>=1.7.0",
+    "pydantic>=2.13",
+    "python-dotenv>=1.2",
+    "rich>=15.0",
+    "prompt-toolkit>=3.0.53",
+]
+
+[project.optional-dependencies]
+knowledge = [
+    "fastembed>=0.8.0",
+    "lancedb>=0.38.0",
+    "rank-bm25>=0.2.2",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+intelli-oppo = "intelli_oppo.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["intelli_oppo*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
