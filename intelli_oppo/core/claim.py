@@ -3,19 +3,102 @@
 Invariant II — scoped claim discipline — lives here. Every verdict the engine
 issues carries an explicit (metric, domain, horizon) triple, and that triple is
 printed. Two opposite conclusions under two different triples are not a
-contradiction; they are a partition of the claim space. That is what makes
-unlimited opposition formally consistent, and what makes the flip legal.
+contradiction; they are a partition of the claim space.
+
+The axes are typed rather than free text, and that is not cosmetic. With
+free-text scopes the contradiction check never fires: two descriptions of the
+same cell almost never match as strings, so the engine can reverse itself
+forever simply by rewording. Typed axes make a collision detectable.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 
 from .moves import MoveId
 
 _WORD = re.compile(r"[A-Za-z0-9'-]+")
+_TOKEN = re.compile(r"[a-z0-9]+")
+
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "at",
+        "by",
+        "for",
+        "from",
+        "in",
+        "of",
+        "on",
+        "or",
+        "over",
+        "the",
+        "to",
+        "under",
+        "with",
+        "within",
+    }
+)
+
+
+def word_count(text: str) -> int:
+    return len(_WORD.findall(text))
+
+
+def _tokens(text: str) -> frozenset[str]:
+    return frozenset(t for t in _TOKEN.findall(text.lower()) if t not in _STOPWORDS)
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a or not b:
+        return 1.0 if a == b else 0.0
+    return len(a & b) / len(a | b)
+
+
+class MetricKind(StrEnum):
+    """The axis a comparison is being judged on.
+
+    Free-text metrics are unusable for collision detection — "total cost of
+    ownership" and "lifetime spend" are the same axis and share no words. The
+    enum gives the contradiction check something stable to compare.
+    """
+
+    COST = "cost"
+    SPEED = "speed"
+    RELIABILITY = "reliability"
+    SIMPLICITY = "simplicity"
+    SCALE = "scale"
+    QUALITY = "quality"
+    RISK = "risk"
+    FLEXIBILITY = "flexibility"
+    LEARNABILITY = "learnability"
+    SECURITY = "security"
+    CORRECTNESS = "correctness"
+    OTHER = "other"
+
+
+class Horizon(StrEnum):
+    IMMEDIATE = "immediate"
+    UNDER_1Y = "under_1y"
+    ONE_TO_3Y = "1_to_3y"
+    THREE_TO_10Y = "3_to_10y"
+    OVER_10Y = "over_10y"
+
+
+HORIZON_LABEL = {
+    Horizon.IMMEDIATE: "immediate",
+    Horizon.UNDER_1Y: "under 1 year",
+    Horizon.ONE_TO_3Y: "1-3 years",
+    Horizon.THREE_TO_10Y: "3-10 years",
+    Horizon.OVER_10Y: "10+ years",
+}
+
+DOMAIN_MATCH_THRESHOLD = 0.5
+"""Token overlap above which two domain descriptions are the same population."""
 
 
 class ClaimShape(StrEnum):
@@ -61,27 +144,35 @@ class Pivot(StrEnum):
     not here, that asymmetry is itself the argument."""
 
 
-def word_count(text: str) -> int:
-    return len(_WORD.findall(text))
-
-
 @dataclass(frozen=True)
 class Scope:
     """The region of claim space a verdict is standing in."""
 
+    metric_kind: MetricKind
     metric: str
+    """Human-readable detail, e.g. "total cost of ownership"."""
+
     domain: str
-    horizon: str
+    horizon: Horizon
 
     def render(self) -> str:
-        return f"{self.metric} · {self.domain} · {self.horizon}"
+        return f"{self.metric} · {self.domain} · {HORIZON_LABEL[self.horizon]}"
 
-    def key(self) -> tuple[str, str, str]:
-        """Normalized form, for detecting when two verdicts occupy one cell."""
+    @property
+    def domain_tokens(self) -> frozenset[str]:
+        return _tokens(self.domain)
+
+    def same_cell_as(self, other: Scope) -> bool:
+        """Whether two verdicts occupy one cell and so may contradict.
+
+        Metric axis and horizon must match exactly; the domain is compared by
+        token overlap, since the same population gets described many ways.
+        """
         return (
-            self.metric.strip().casefold(),
-            self.domain.strip().casefold(),
-            self.horizon.strip().casefold(),
+            self.metric_kind is other.metric_kind
+            and self.horizon is other.horizon
+            and _jaccard(self.domain_tokens, other.domain_tokens)
+            >= DOMAIN_MATCH_THRESHOLD
         )
 
 
@@ -112,6 +203,8 @@ class Verdict:
     """Free-form headline, used when there is no winner/loser pair to print."""
 
     shape: ClaimShape = ClaimShape.COMPARATIVE
+    protected: bool = False
+    """Set when the claim was ruled not open to substantive dispute."""
 
     @property
     def is_meta(self) -> bool:
@@ -142,14 +235,3 @@ class Turn:
 
     pivot: Pivot = Pivot.NONE
     """Which of the four legal pivots fired, when conceded is True."""
-
-
-@dataclass
-class Debate:
-    """Mutable state for a single debate session."""
-
-    turns: list[Turn] = field(default_factory=list)
-
-    @property
-    def opening_claim(self) -> str:
-        return self.turns[0].user_text if self.turns else ""

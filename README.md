@@ -71,12 +71,40 @@ Phase 0 — walking skeleton. It argues, it flips when you concede, and it print
 its scope every turn. Retrieval, verification gates, and the full pipeline land
 in later phases; see the open issues.
 
-Two invariants are enforced in code rather than asked for in the prompt, because
-prompt text alone did not hold them:
+Guarantees are enforced in code rather than asked for in the prompt, because
+prompt text alone did not hold them. Each was added after a live run broke it:
 
 - The engine may not end up on the side you already hold.
 - A settled fact is never printed as the loser. Assertions route to
   meta-opposition, which grants the fact and disputes the argument for it.
+- Claims that are not debating material are screened out before the reasoning
+  call and routed to a constrained path.
+- Two verdicts cannot occupy one scope cell with opposite winners.
+
+## The safety gate
+
+Every turn is screened by `openai/gpt-oss-safeguard-20b` before the reasoning
+call. Claims about toxicity, atrocities, dehumanization, self-harm and settled
+public-health facts are **protected**: the engine grants the proposition and
+disputes only how it was *argued*.
+
+Without this, the engine argued that *"many low-concentration exposures are
+negligible"* about drinking bleach, and asked what *"policy or educational
+agenda"* was served by calling the Holocaust a moral catastrophe. Invariant I
+held mechanically in both — the fact was granted, the attack landed on the
+argument. That was not enough.
+
+On a protected turn, three things are enforced in code:
+
+- Only `formal_defeat` is permitted. Every other move reaches for the claim's
+  substance; `criterion_shift` is what produced the LD50 argument.
+- No language about quantities, doses, thresholds, or conditions under which
+  the claim might not hold.
+- The challenge may not question your motive.
+
+Screening **fails closed**. If the classifier is unreachable the claim is
+treated as protected, because declining to argue is recoverable and arguing
+something harmful because the screen was down is not.
 
 ## Rate limits
 
@@ -98,7 +126,7 @@ wordiness there is paid for on every single turn.
 ## Development
 
 ```bash
-pytest              # 37 tests, all offline
+pytest              # 69 tests, all offline
 ruff check .
 ruff format .
 ```

@@ -9,6 +9,10 @@ Stores every scoped commitment from both sides. Three jobs:
 The contradiction check here is the `flip coherence` eval metric, and it costs
 nothing: two verdicts occupying the same (metric, domain, horizon) cell while
 favouring different winners is a real contradiction. Different cells never are.
+
+Cell identity is decided by `Scope.same_cell_as`, not by string equality. String
+equality made this check near-vacuous: the engine could reword its way out of
+any contradiction.
 """
 
 from __future__ import annotations
@@ -83,7 +87,7 @@ class Ledger:
                     # Meta-opposition grants the claim rather than backing a
                     # side, so it cannot disagree with anything about a winner.
                     continue
-                if earlier.verdict.scope.key() != later.verdict.scope.key():
+                if not earlier.verdict.scope.same_cell_as(later.verdict.scope):
                     continue
                 if _norm(earlier.verdict.winner) == _norm(later.verdict.winner):
                     continue
