@@ -71,6 +71,38 @@ Phase 0 — walking skeleton. It argues, it flips when you concede, and it print
 its scope every turn. Retrieval, verification gates, and the full pipeline land
 in later phases; see the open issues.
 
+Two invariants are enforced in code rather than asked for in the prompt, because
+prompt text alone did not hold them:
+
+- The engine may not end up on the side you already hold.
+- A settled fact is never printed as the loser. Assertions route to
+  meta-opposition, which grants the fact and disputes the argument for it.
+
+## Rate limits
+
+The Groq free tier allows **8,000 tokens per minute**. One turn costs roughly
+2.5k — system prompt, JSON schema, and reply — so sustained debate hits the
+ceiling after two or three turns, and Groq *queues* rather than rejecting. A
+turn that normally takes 3s then takes 20-40s.
+
+Measured, on `openai/gpt-oss-120b`:
+
+| | |
+| --- | --- |
+| Within budget | 2.9-3.8s per turn, ~350-390 tok/s |
+| Throttled | 17-26s per turn, ~50 tok/s |
+
+The move catalogue is re-sent on every call and is ~40% of the system prompt, so
+wordiness there is paid for on every single turn.
+
+## Development
+
+```bash
+pytest              # 37 tests, all offline
+ruff check .
+ruff format .
+```
+
 ## Model routing
 
 Groq, behind a provider interface so other backends can be added.
