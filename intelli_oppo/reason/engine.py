@@ -1,13 +1,18 @@
 """The Phase 0 opposition engine.
 
-One reasoning call with the ontology inlined, then two checks enforced in code
-rather than requested in a prompt:
+One reasoning call with the ontology inlined, then a set of checks enforced in
+code rather than requested in a prompt:
 
+* the safety gate — some claims are not debating material
 * the opposition invariant — the engine may not end up on the user's side
+* Invariant I — a settled fact is never printed as the loser
 * the output budget — a word cap asked for in a prompt is a suggestion
 
-Phase 1 replaces the single call with the staged pipeline; these two guards
-survive that change unaltered.
+Every one of these was added after a live run broke it. Prompt text alone held
+none of them.
+
+Phase 1 replaces the single call with the staged pipeline; these guards survive
+that change unaltered.
 """
 
 from __future__ import annotations
@@ -17,11 +22,21 @@ from dataclasses import replace
 from pydantic import BaseModel, Field
 
 from ..config import Settings
-from ..core.claim import ClaimShape, Pivot, Point, Scope, Turn, Verdict
+from ..core.claim import (
+    ClaimShape,
+    Horizon,
+    MetricKind,
+    Pivot,
+    Point,
+    Scope,
+    Turn,
+    Verdict,
+)
 from ..core.ledger import Ledger
 from ..core.moves import MoveId
 from ..llm.provider import LLMError, LLMProvider, Role
 from . import prompts
+from .guard import Sensitivity, protected_fault, screen
 
 REASONING_TOKENS = 2048
 """GPT-OSS spends part of this on hidden reasoning, so it cannot be tight.
@@ -60,9 +75,10 @@ class VerdictOut(BaseModel):
     position: str = Field(description="Headline when shape is assertion; else empty")
     winner: str = Field(description="Option you back; empty when shape is assertion")
     loser: str
+    metric_kind: MetricKind
     metric: str
     domain: str
-    horizon: str
+    horizon: Horizon
     points: list[PointOut]
     challenge: str
     pivot: Pivot
@@ -92,13 +108,38 @@ class OppositionEngine:
         self._settings = settings
         self.ledger = ledger or Ledger()
 
+    # ── turns ─────────────────────────────────────────────────────────
+
     async def respond(self, user_text: str) -> Turn:
-        """Oppose whatever the user just said."""
+        """Oppose whatever the user just said, unless it is not arguable."""
+        guard = await screen(self._llm, user_text)
+        if guard.sensitivity is Sensitivity.PROTECTED:
+            return await self._respond_protected(user_text, guard.reason)
+
         prompt = prompts.opening(user_text, self.ledger.context_for_prompt())
         out = await self._ask(prompt)
         out = await self._repair(out, prompt, must_not_back=out.user_favors)
         verdict = await self._to_verdict(out)
 
+        turn = Turn(user_text=user_text, user_favors=out.user_favors, verdict=verdict)
+        self.ledger.record(turn)
+        return turn
+
+    async def _respond_protected(self, user_text: str, reason: str) -> Turn:
+        """Grant the claim, dispute only how it was argued."""
+        prompt = prompts.protected(user_text, reason)
+        out = await self._ask(prompt)
+
+        problem = self._protected_fault(out)
+        if problem is not None:
+            out = await self._ask(
+                f"{prompt}\n\nYour previous answer was rejected: {problem}\n"
+                f"Correct it and return the whole verdict again."
+            )
+            if (still := self._protected_fault(out)) is not None:
+                raise LLMError(f"could not produce a usable verdict: {still}")
+
+        verdict = await self._to_verdict(out, protected=True)
         turn = Turn(user_text=user_text, user_favors=out.user_favors, verdict=verdict)
         self.ledger.record(turn)
         return turn
@@ -109,6 +150,9 @@ class OppositionEngine:
             raise LLMError("nothing to concede to yet — make a claim first")
 
         last = self.ledger.turns[-1].verdict
+        if last.protected:
+            raise LLMError("that turn was not a debate — there is nothing to concede")
+
         held = last.winner or last.position
         prompt = prompts.concession(self.ledger.context_for_prompt(), held)
         out = await self._ask(prompt)
@@ -125,14 +169,7 @@ class OppositionEngine:
         self.ledger.record(turn)
         return turn
 
-    async def _ask(self, prompt: str) -> VerdictOut:
-        return await self._llm.structured(
-            role=Role.REASONING,
-            system=prompts.SYSTEM,
-            user=prompt,
-            model=VerdictOut,
-            max_tokens=REASONING_TOKENS,
-        )
+    # ── guards ────────────────────────────────────────────────────────
 
     def fault(self, out: VerdictOut, must_not_back: str) -> str | None:
         """Why this verdict is unusable, or None if it is fine.
@@ -165,6 +202,13 @@ class OppositionEngine:
             )
         return None
 
+    def _protected_fault(self, out: VerdictOut) -> str | None:
+        if out.shape is not ClaimShape.ASSERTION:
+            return "a protected claim must be shape 'assertion' with no winner/loser."
+        if not out.position.strip():
+            return "`position` must carry the headline."
+        return protected_fault(out.points, out.challenge, out.granted)
+
     async def _repair(
         self, out: VerdictOut, prompt: str, must_not_back: str
     ) -> VerdictOut:
@@ -181,7 +225,18 @@ class OppositionEngine:
             raise LLMError(f"could not produce a usable verdict: {still}")
         return retry
 
-    async def _to_verdict(self, out: VerdictOut) -> Verdict:
+    # ── plumbing ──────────────────────────────────────────────────────
+
+    async def _ask(self, prompt: str) -> VerdictOut:
+        return await self._llm.structured(
+            role=Role.REASONING,
+            system=prompts.SYSTEM,
+            user=prompt,
+            model=VerdictOut,
+            max_tokens=REASONING_TOKENS,
+        )
+
+    async def _to_verdict(self, out: VerdictOut, protected: bool = False) -> Verdict:
         points = tuple(Point(move=p.move, text=p.text) for p in out.points)
         meta = out.shape is ClaimShape.ASSERTION
         verdict = Verdict(
@@ -189,10 +244,16 @@ class OppositionEngine:
             winner="" if meta else out.winner,
             loser="" if meta else out.loser,
             position=out.position,
-            scope=Scope(metric=out.metric, domain=out.domain, horizon=out.horizon),
+            scope=Scope(
+                metric_kind=out.metric_kind,
+                metric=out.metric,
+                domain=out.domain,
+                horizon=out.horizon,
+            ),
             points=points,
             challenge=out.challenge,
             granted=out.granted,
+            protected=protected,
         )
         if verdict.body_words <= self._settings.max_body_words:
             return verdict

@@ -39,12 +39,11 @@ class Glyphs:
     verdict: str
     beats: str
     arrow: str
-    sep: str
     dash: str
 
 
-UNICODE = Glyphs(verdict="✗", beats="≻", arrow="⟶", sep="·", dash="—")
-ASCII = Glyphs(verdict="X", beats=">", arrow="->", sep="-", dash="-")
+UNICODE = Glyphs(verdict="✗", beats="≻", arrow="⟶", dash="—")
+ASCII = Glyphs(verdict="X", beats=">", arrow="->", dash="-")
 
 _PROBE = "✗≻⟶·—"
 
@@ -114,6 +113,10 @@ class Renderer:
             granted = Text("granted: ", style="gate")
             granted.append(v.granted)
             self._indented(granted)
+
+        if v.protected:
+            self.console.print()
+            self._indented(Text("not open to substantive dispute", style="gate"))
 
         if turn.conceded:
             self.console.print()
@@ -190,19 +193,14 @@ class Renderer:
             Evidence.SOME: "faint",
             Evidence.REQUIRED: "anti",
         }
-        table = Table(box=None, show_header=False, pad_edge=False, padding=(0, 2, 0, 0))
-        table.add_column(style="move", no_wrap=True)
-        table.add_column(no_wrap=True)
-        table.add_column(no_wrap=True)
-        for move in MOVES.values():
-            table.add_row(
-                move.id.value,
-                move.attacks,
-                Text(move.evidence.value, style=colours[move.evidence]),
-            )
-
         self.console.print()
-        self.console.print(Padding(table, (0, 0, 0, 2)))
+        for move in MOVES.values():
+            head = Text("  ")
+            head.append(f"{move.id.value:<22}", style="move")
+            head.append(f"{move.attacks:<26}")
+            head.append(move.evidence.value, style=colours[move.evidence])
+            self.console.print(head)
+            self.console.print(Padding(Text(move.form, style="faint"), (0, 0, 0, 4)))
         self.console.print()
         self.console.print(
             "  [faint]evidence: what the move needs before it may be used. "

@@ -40,7 +40,9 @@ class GroqProvider(LLMProvider):
     ) -> None:
         if not token:
             raise LLMError("GROQ_TOKEN is empty — copy .env.example to .env")
-        self._client = AsyncGroq(api_key=token, timeout=timeout, max_retries=2)
+        # The free tier is 8k tokens/minute and a turn costs ~3k, so 429s are
+        # routine rather than exceptional. The SDK honours `retry-after`.
+        self._client = AsyncGroq(api_key=token, timeout=timeout, max_retries=4)
         self._router = router or ModelRouter.from_env()
         self.last = CallStats()
 
@@ -83,6 +85,11 @@ class GroqProvider(LLMProvider):
         try:
             response = await self._client.chat.completions.create(**kwargs)
         except APIError as exc:
+            if getattr(exc, "status_code", None) == 429:
+                raise LLMError(
+                    "rate limited — the free tier allows 8k tokens per minute "
+                    "and a turn costs about 3k. Wait a moment and try again."
+                ) from exc
             raise LLMError(f"{model}: {exc}") from exc
         except Exception as exc:  # network, timeout, SDK-level failures
             raise LLMError(f"{model}: {exc}") from exc

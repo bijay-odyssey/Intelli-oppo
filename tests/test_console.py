@@ -8,7 +8,7 @@ def test_force_ascii_wins():
 def test_ascii_glyphs_are_pure_ascii():
     """The fallback exists for consoles that cannot encode the unicode set;
     it defeats the purpose if the fallback itself is non-ascii."""
-    for value in (ASCII.verdict, ASCII.beats, ASCII.arrow, ASCII.sep, ASCII.dash):
+    for value in (ASCII.verdict, ASCII.beats, ASCII.arrow, ASCII.dash):
         value.encode("ascii")
 
 

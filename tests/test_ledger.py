@@ -1,4 +1,21 @@
-from intelli_oppo.core import Ledger, MoveId, Point, Scope, Turn, Verdict
+from intelli_oppo.core import (
+    ClaimShape,
+    Horizon,
+    Ledger,
+    MetricKind,
+    MoveId,
+    Point,
+    Scope,
+    Turn,
+    Verdict,
+)
+
+THROUGHPUT = Scope(
+    MetricKind.SPEED, "merge-queue throughput", "org > 50 eng", Horizon.ONE_TO_3Y
+)
+COST = Scope(
+    MetricKind.COST, "total cost of ownership", "org > 50 eng", Horizon.THREE_TO_10Y
+)
 
 
 def make_turn(winner: str, loser: str, scope: Scope, user_favors: str = "") -> Turn:
@@ -6,17 +23,13 @@ def make_turn(winner: str, loser: str, scope: Scope, user_favors: str = "") -> T
         user_text=f"{loser} is better than {winner}",
         user_favors=user_favors or loser,
         verdict=Verdict(
-            winner=winner,
-            loser=loser,
             scope=scope,
             points=(Point(move=MoveId.CRITERION_SHIFT, text="metric is wrong"),),
             challenge="which metric?",
+            winner=winner,
+            loser=loser,
         ),
     )
-
-
-THROUGHPUT = Scope("merge-queue throughput", "org > 50 eng", "3y")
-COST = Scope("total cost of ownership", "org > 50 eng", "10y")
 
 
 def test_opposite_winners_in_different_scopes_is_not_a_contradiction():
@@ -40,10 +53,27 @@ def test_opposite_winners_in_one_scope_is_a_contradiction():
     assert "microservices" in found[0].render()
 
 
-def test_scope_matching_ignores_case_and_padding():
+def test_reworded_scope_no_longer_escapes_detection():
+    """The regression that made this metric near-vacuous.
+
+    Both scopes describe one cell in different words. Under string comparison
+    the engine reversed its winner and the record came back clean.
+    """
+    a = Scope(
+        MetricKind.CORRECTNESS,
+        "numerical equality of base-10 integers",
+        "primary-school arithmetic expressions",
+        Horizon.IMMEDIATE,
+    )
+    b = Scope(
+        MetricKind.CORRECTNESS,
+        "standard base-10 integer addition",
+        "primary-school arithmetic",
+        Horizon.IMMEDIATE,
+    )
     ledger = Ledger()
-    ledger.record(make_turn("a", "b", Scope("Cost", "Teams", "5y")))
-    ledger.record(make_turn("b", "a", Scope("  cost ", "TEAMS", "5y")))
+    ledger.record(make_turn("X", "Y", a))
+    ledger.record(make_turn("Y", "X", b))
 
     assert len(ledger.contradictions()) == 1
 
@@ -84,37 +114,39 @@ def test_empty_ledger_context_is_explicit():
     assert "opening claim" in Ledger().context_for_prompt()
 
 
+def _meta(scope: Scope, position: str, granted: str = "") -> Verdict:
+    return Verdict(
+        scope=scope,
+        points=(),
+        challenge="",
+        granted=granted,
+        position=position,
+        shape=ClaimShape.ASSERTION,
+    )
+
+
 def test_meta_turns_never_count_as_contradictions():
     """A meta-opposition turn grants the claim rather than backing a side, so it
     has no winner to disagree with — even in an identical scope cell."""
-    from intelli_oppo.core import ClaimShape
-
-    meta = Verdict(
-        scope=THROUGHPUT,
-        points=(),
-        challenge="",
-        granted="microservices deploy more often",
-        position="Not disputing that. Disputing that it decides anything.",
-        shape=ClaimShape.ASSERTION,
-    )
     ledger = Ledger()
     ledger.record(make_turn("microservices", "monolith", THROUGHPUT))
-    ledger.record(Turn(user_text="x", user_favors="monolith", verdict=meta))
-
+    ledger.record(
+        Turn(
+            user_text="x",
+            user_favors="monolith",
+            verdict=_meta(THROUGHPUT, "Not disputing that.", "they deploy often"),
+        )
+    )
     assert ledger.contradictions() == []
 
 
 def test_commitments_render_meta_turns_by_position():
-    from intelli_oppo.core import ClaimShape
-
-    meta = Verdict(
-        scope=COST,
-        points=(),
-        challenge="",
-        position="Granted, and it does no work.",
-        shape=ClaimShape.ASSERTION,
-    )
     ledger = Ledger()
-    ledger.record(Turn(user_text="x", user_favors="y", verdict=meta))
-
+    ledger.record(
+        Turn(
+            user_text="x",
+            user_favors="y",
+            verdict=_meta(COST, "Granted, and it does no work."),
+        )
+    )
     assert "Granted, and it does no work." in ledger.commitments()[0]

@@ -1,6 +1,9 @@
 from .claim import (
+    DOMAIN_MATCH_THRESHOLD,
+    HORIZON_LABEL,
     ClaimShape,
-    Debate,
+    Horizon,
+    MetricKind,
     Pivot,
     Point,
     Scope,
@@ -12,13 +15,16 @@ from .ledger import Contradiction, Ledger
 from .moves import FORMAL_MOVES, MOVES, Evidence, Move, MoveId, catalogue
 
 __all__ = [
-    "MOVES",
+    "DOMAIN_MATCH_THRESHOLD",
     "FORMAL_MOVES",
+    "HORIZON_LABEL",
+    "MOVES",
     "ClaimShape",
     "Contradiction",
-    "Debate",
     "Evidence",
+    "Horizon",
     "Ledger",
+    "MetricKind",
     "Move",
     "MoveId",
     "Pivot",
