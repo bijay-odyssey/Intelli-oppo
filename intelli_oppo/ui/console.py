@@ -17,7 +17,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
-from ..core.claim import Turn, Verdict
+from ..core.claim import Turn, TurnKind, Verdict
 from ..core.ledger import Ledger
 
 THEME = Theme(
@@ -118,6 +118,12 @@ class Renderer:
             self.console.print()
             self._indented(Text("not open to substantive dispute", style="gate"))
 
+        if turn.kind is TurnKind.COUNTER:
+            self.console.print()
+            self._indented(
+                Text("holding — same scope, your objection answered", style="gate")
+            )
+
         if turn.conceded:
             self.console.print()
             self._indented(
@@ -206,6 +212,14 @@ class Renderer:
             "  [faint]evidence: what the move needs before it may be used. "
             "The four marked 'none' are the fabrication floor.[/faint]"
         )
+        self.console.print()
+
+    def aside(self, text: str) -> None:
+        """Small talk. No verdict, no scope, no ledger entry."""
+        self.console.print()
+        line = Text("IO   ", style="faint")
+        line.append(text)
+        self.console.print(Padding(line, (0, 0, 0, 0)))
         self.console.print()
 
     # ── messages ──────────────────────────────────────────────────────

@@ -28,14 +28,17 @@ from ..core.claim import (
     MetricKind,
     Pivot,
     Point,
+    Response,
     Scope,
     Turn,
+    TurnKind,
     Verdict,
 )
 from ..core.ledger import Ledger
 from ..core.moves import MoveId
 from ..llm.provider import LLMError, LLMProvider, Role
 from . import prompts
+from .classify import classify
 from .guard import Sensitivity, protected_fault, screen
 
 REASONING_TOKENS = 2048
@@ -110,8 +113,33 @@ class OppositionEngine:
 
     # ── turns ─────────────────────────────────────────────────────────
 
-    async def respond(self, user_text: str) -> Turn:
-        """Oppose whatever the user just said, unless it is not arguable."""
+    async def respond(self, user_text: str) -> Response:
+        """Route one turn.
+
+        Classification runs on the cheap model first. Asides never reach the
+        reasoning model at all, and concessions and asides skip the safety
+        screen because they carry no new claim to screen.
+        """
+        label = await classify(
+            self._llm,
+            user_text,
+            self.ledger.context_for_prompt(),
+            has_history=not self.ledger.is_empty,
+        )
+
+        if label.kind is TurnKind.ASIDE:
+            return Response(kind=label.kind, text=await self._aside(user_text))
+
+        if label.kind is TurnKind.CONCESSION:
+            return Response(kind=label.kind, turn=await self.concede())
+
+        if label.kind is TurnKind.COUNTER:
+            return Response(kind=label.kind, turn=await self._rebut(user_text))
+
+        return Response(kind=label.kind, turn=await self._oppose(user_text))
+
+    async def _oppose(self, user_text: str) -> Turn:
+        """Take the other side of a fresh claim, unless it is not arguable."""
         guard = await screen(self._llm, user_text)
         if guard.sensitivity is Sensitivity.PROTECTED:
             return await self._respond_protected(user_text, guard.reason)
@@ -124,6 +152,49 @@ class OppositionEngine:
         turn = Turn(user_text=user_text, user_favors=out.user_favors, verdict=verdict)
         self.ledger.record(turn)
         return turn
+
+    async def _rebut(self, user_text: str) -> Turn:
+        """The user pushed back. Hold the position and the scope."""
+        last = self.ledger.turns[-1].verdict
+        if last.protected:
+            # There was no position to defend, so treat this as a fresh claim.
+            return await self._oppose(user_text)
+
+        held = last.headline
+        prompt = prompts.rebuttal(
+            user_text,
+            self.ledger.context_for_prompt(),
+            held,
+            last.scope.render(),
+        )
+        out = await self._ask(prompt)
+        out = await self._repair(out, prompt, must_not_back=out.user_favors)
+        out = await self._hold_ground(out, prompt, last)
+        verdict = await self._to_verdict(out)
+
+        turn = Turn(
+            user_text=user_text,
+            user_favors=out.user_favors,
+            verdict=verdict,
+            kind=TurnKind.COUNTER,
+        )
+        self.ledger.record(turn)
+        return turn
+
+    async def _aside(self, user_text: str) -> str:
+        """Small talk. Cheap model, no ledger entry, no reasoning call."""
+        try:
+            return (
+                await self._llm.complete(
+                    role=Role.UTILITY,
+                    system=prompts.ASIDE_SYSTEM,
+                    user=user_text,
+                    max_tokens=256,
+                    temperature=0.4,
+                )
+            ).strip()
+        except LLMError:
+            return "That is not a claim. Give me one."
 
     async def _respond_protected(self, user_text: str, reason: str) -> Turn:
         """Grant the claim, dispute only how it was argued."""
@@ -165,11 +236,54 @@ class OppositionEngine:
             verdict=verdict,
             conceded=True,
             pivot=out.pivot if out.pivot is not Pivot.NONE else Pivot.SYMMETRY,
+            kind=TurnKind.CONCESSION,
         )
         self.ledger.record(turn)
         return turn
 
     # ── guards ────────────────────────────────────────────────────────
+
+    def rebuttal_fault(self, out: VerdictOut, held: Verdict) -> str | None:
+        """Why this rebuttal moved when it should have held.
+
+        The prompt asks the engine to keep its scope while answering an
+        objection. Asking is not enough — sliding the scope sideways under
+        pressure is exactly the cheap trick Invariant II exists to prevent, and
+        it is the most tempting move available when a counter lands.
+        """
+        moved = Scope(
+            metric_kind=out.metric_kind,
+            metric=out.metric,
+            domain=out.domain,
+            horizon=out.horizon,
+        )
+        if not moved.same_cell_as(held.scope):
+            return (
+                f"you moved the scope from [{held.scope.render()}] to "
+                f"[{moved.render()}] while answering an objection. Hold the cell: "
+                f"metric_kind and horizon must not change."
+            )
+        if not held.is_meta and not _same(out.winner, held.winner):
+            return (
+                f"you switched from backing '{held.winner}' to '{out.winner}'. "
+                f"The user countered, they did not concede. Hold your side."
+            )
+        return None
+
+    async def _hold_ground(
+        self, out: VerdictOut, prompt: str, held: Verdict
+    ) -> VerdictOut:
+        problem = self.rebuttal_fault(out, held)
+        if problem is None:
+            return out
+
+        retry = await self._ask(
+            f"{prompt}\n\nYour previous answer was rejected: {problem}\n"
+            f"Correct it and return the whole verdict again."
+        )
+        if (still := self.rebuttal_fault(retry, held)) is not None:
+            raise LLMError(f"could not hold position: {still}")
+        return retry
 
     def fault(self, out: VerdictOut, must_not_back: str) -> str | None:
         """Why this verdict is unusable, or None if it is fine.

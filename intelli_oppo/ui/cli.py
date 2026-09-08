@@ -8,7 +8,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 
 from ..config import ConfigError, Settings
-from ..core.claim import Turn
+from ..core.claim import Response, TurnKind
 from ..llm.groq_provider import GroqProvider
 from ..llm.provider import LLMError
 from ..llm.router import ModelRouter
@@ -18,7 +18,7 @@ from .console import Renderer
 HELP = """\
   /scope     the metric, domain and horizon it is currently standing in
   /ledger    every scoped commitment, and any contradictions
-  /concede   agree with it, and watch the pivot fire
+  /concede   force the flip (it also detects agreement on its own)
   /moves     the twelve-move opposition ontology
   /models    which model is doing what
   /reset     clear the ledger and start a new debate
@@ -51,7 +51,7 @@ class Repl:
         )
         self.ui.print()
 
-    async def _think(self, coro) -> Turn:
+    async def _think(self, coro):
         with self.ui.console.status("[faint]thinking[/faint]", spinner="dots"):
             return await coro
 
@@ -88,14 +88,20 @@ class Repl:
 
         try:
             if command == "/concede":
-                turn = await self._think(self.engine.concede())
+                reply = Response(
+                    kind=TurnKind.CONCESSION,
+                    turn=await self._think(self.engine.concede()),
+                )
             else:
-                turn = await self._think(self.engine.respond(text))
+                reply = await self._think(self.engine.respond(text))
         except LLMError as exc:
             self.ui.error(str(exc))
             return True
 
-        self.ui.verdict(turn)
+        if reply.is_aside:
+            self.ui.aside(reply.text)
+        else:
+            self.ui.verdict(reply.turn)
         self.ui.info(f"  {self.provider.last.render()}")
         self.ui.print()
         return True
