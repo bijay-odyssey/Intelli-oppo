@@ -103,6 +103,7 @@ for on every single turn. Before adding to a prompt, check what it costs:
 
 ```python
 from intelli_oppo.reason import prompts
+
 print(len(prompts.SYSTEM))
 ```
 
