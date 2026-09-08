@@ -118,6 +118,22 @@ class ClaimShape(StrEnum):
     """A single proposition. Oppose the argument, not the proposition."""
 
 
+class TurnKind(StrEnum):
+    """What the user just did. Decided before any expensive call runs."""
+
+    CLAIM = "claim"
+    """A position to take the other side of."""
+
+    COUNTER = "counter"
+    """Arguing back. Hold the position, rebut the objection."""
+
+    CONCESSION = "concession"
+    """Agreement. Fire the flip."""
+
+    ASIDE = "aside"
+    """Greeting, thanks, or a question about the tool. No debate content."""
+
+
 class Pivot(StrEnum):
     """The four legal ways to reverse position after the user concedes.
 
@@ -235,3 +251,22 @@ class Turn:
 
     pivot: Pivot = Pivot.NONE
     """Which of the four legal pivots fired, when conceded is True."""
+
+    kind: TurnKind = TurnKind.CLAIM
+
+
+@dataclass(frozen=True)
+class Response:
+    """What one exchange produced.
+
+    An aside carries no `turn`: small talk is answered but never enters the
+    ledger, because it commits neither side to anything.
+    """
+
+    kind: TurnKind
+    turn: Turn | None = None
+    text: str = ""
+
+    @property
+    def is_aside(self) -> bool:
+        return self.turn is None
