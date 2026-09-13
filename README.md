@@ -64,27 +64,51 @@ what makes the flip legal rather than a coin toss with a vocabulary.
 `/ledger` will show you every commitment it has made and check them against each
 other.
 
-## Install
+## Quickstart
 
-Python 3.12.
+Clone it, add a key, run one command. There is **no server to start** — this is
+a CLI that calls a remote API.
 
 ```bash
 git clone https://github.com/bijay-odyssey/Intelli-oppo
 cd Intelli-oppo
+
+./start.sh          # macOS / Linux / Git Bash
+start.bat           # Windows
+```
+
+The script creates the virtualenv, installs dependencies, and writes a `.env` on
+first run. Paste a free key from
+[console.groq.com/keys](https://console.groq.com/keys) into it and run again.
+
+| Command | Does |
+| --- | --- |
+| `./start.sh` | Argue with it |
+| `./start.sh demo` | Watch a scripted debate — every route, generated live |
+| `./start.sh check` | Verify interpreter, dependencies, key and API access |
+| `./start.sh test` | Run the offline test suite |
+| `./start.sh ask "cats beat dogs"` | One turn, then exit |
+
+`start.bat` takes the same arguments on Windows.
+
+**Start with `demo`.** It runs a five-turn debate showing the behaviour you
+would otherwise have to know to look for: holding ground under a counter,
+flipping when you agree, refusing to argue some things at all.
+
+### Manual setup
+
+```bash
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 source .venv/bin/activate       # macOS / Linux
 pip install -e ".[dev]"
-
 cp .env.example .env            # then add your Groq key
+
+python -m intelli_oppo --check  # confirm everything works
+python -m intelli_oppo          # argue
 ```
 
-A free key from [console.groq.com/keys](https://console.groq.com/keys) runs
-everything.
-
-```bash
-python -m intelli_oppo
-```
+Python 3.12. `--help` lists every flag.
 
 ## Commands
 
@@ -192,7 +216,7 @@ not an error.
 ## Development
 
 ```bash
-pytest              # 79 tests, all offline — no API key needed
+./start.sh test     # 81 tests, all offline — no API key needed
 ruff check .
 ruff format .
 ```

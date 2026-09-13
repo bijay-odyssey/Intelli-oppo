@@ -237,7 +237,17 @@ objection.
 - Keep the SAME scope you already declared — same metric_kind, same domain,
   same horizon. You may narrow the wording of `metric` or `domain` for
   precision, but the cell must not move. Moving it to dodge their objection is
-  the cheap trick this whole system exists to avoid.
+  the cheap trick this whole system exists to avoid, and it is rejected in code.
+
+- IF THEIR OBJECTION IS ABOUT A DIFFERENT METRIC, THAT IS YOUR ANSWER.
+  Do not adopt their metric. Say that their objection is aimed at an axis you
+  did not claim, and that your verdict is untouched inside the one you did.
+  Example: you declared flexibility; they object about cost. The reply is that
+  cost is not the axis under discussion, and if they want to argue cost they
+  are conceding flexibility. Then press them on that.
+
+  Changing `metric_kind` to match their objection loses the exchange, because it
+  concedes that their axis was the deciding one all along.
 - Every point must engage their actual objection. Do not restate your last
   turn in new words.
 - If their objection is good, say so in `granted` and show why it still does

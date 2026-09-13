@@ -41,6 +41,11 @@ from . import prompts
 from .classify import classify
 from .guard import Sensitivity, protected_fault, screen
 
+HOLD_ATTEMPTS = 2
+"""Corrective rounds allowed when a rebuttal drifts off its declared scope.
+Answering an objection without adopting its metric is a genuinely hard
+instruction; the model gets there reliably, but not always on the first try."""
+
 REASONING_TOKENS = 2048
 """GPT-OSS spends part of this on hidden reasoning, so it cannot be tight.
 It also cannot be generous: the free tier allows 8k tokens per minute, and a
@@ -273,17 +278,19 @@ class OppositionEngine:
     async def _hold_ground(
         self, out: VerdictOut, prompt: str, held: Verdict
     ) -> VerdictOut:
-        problem = self.rebuttal_fault(out, held)
-        if problem is None:
-            return out
+        for _ in range(HOLD_ATTEMPTS):
+            problem = self.rebuttal_fault(out, held)
+            if problem is None:
+                return out
+            out = await self._ask(
+                f"{prompt}\n\nYour previous answer was rejected: {problem}\n"
+                f"Do not adopt their metric. Answer from inside the scope you "
+                f"already declared, and return the whole verdict again."
+            )
 
-        retry = await self._ask(
-            f"{prompt}\n\nYour previous answer was rejected: {problem}\n"
-            f"Correct it and return the whole verdict again."
-        )
-        if (still := self.rebuttal_fault(retry, held)) is not None:
+        if (still := self.rebuttal_fault(out, held)) is not None:
             raise LLMError(f"could not hold position: {still}")
-        return retry
+        return out
 
     def fault(self, out: VerdictOut, must_not_back: str) -> str | None:
         """Why this verdict is unusable, or None if it is fine.

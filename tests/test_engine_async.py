@@ -430,10 +430,8 @@ async def test_cannot_concede_to_a_protected_turn():
 # objection, and precisely what Invariant II exists to prevent.
 
 
-async def _counter_after_claim(second_verdict: dict, third: dict | None = None):
-    reasoning = [verdict_payload(), second_verdict]
-    if third is not None:
-        reasoning.append(third)
+async def _counter_after_claim(*verdicts: dict):
+    reasoning = [verdict_payload(), *verdicts]
     return build(
         {
             Role.SAFEGUARD: [guard_payload()],
@@ -487,3 +485,32 @@ async def test_rebuttal_that_will_not_hold_raises():
     await engine.respond("Monoliths are better.")
     with pytest.raises(LLMError, match="could not hold position"):
         await engine.respond("Coordination cost is overstated.")
+
+
+async def test_rebuttal_gets_two_corrective_attempts():
+    """Answering an objection without adopting its metric is hard enough that
+    one retry was not sufficient in live runs."""
+    engine, provider = await _counter_after_claim(
+        verdict_payload(metric_kind="cost", horizon="over_10y"),
+        verdict_payload(metric_kind="cost", horizon="over_10y"),
+    )
+    # third scripted reasoning reply repeats the last item, which is still wrong
+    await engine.respond("Monoliths are better.")
+    with pytest.raises(LLMError, match="could not hold position"):
+        await engine.respond("Coordination cost is overstated.")
+
+    # one claim + first attempt + two corrective rounds
+    assert provider.count(Role.REASONING) == 4
+
+
+async def test_rebuttal_recovers_on_the_second_corrective_round():
+    engine, provider = await _counter_after_claim(
+        verdict_payload(metric_kind="cost", horizon="over_10y"),
+        verdict_payload(metric_kind="risk", horizon="over_10y"),
+        verdict_payload(),
+    )
+    await engine.respond("Monoliths are better.")
+    reply = await engine.respond("Coordination cost is overstated.")
+
+    assert reply.turn.verdict.scope.metric_kind is MetricKind.SPEED
+    assert provider.count(Role.REASONING) == 4
