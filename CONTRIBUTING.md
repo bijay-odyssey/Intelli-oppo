@@ -64,7 +64,7 @@ A free key from [console.groq.com/keys](https://console.groq.com/keys) is enough
 to run everything.
 
 ```bash
-pytest              # 79 tests, all offline — no key needed
+./start.sh test     # 81 tests, all offline — no key needed
 ruff check .
 ruff format .
 python -m intelli_oppo

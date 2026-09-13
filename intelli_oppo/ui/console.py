@@ -222,6 +222,27 @@ class Renderer:
         self.console.print(Padding(line, (0, 0, 0, 0)))
         self.console.print()
 
+    def echo_input(self, prompt: str, text: str) -> None:
+        """Render a line of input we were given rather than typed.
+
+        Keeps piped runs, --ask and the demo reading as real transcripts."""
+        line = Text(prompt, style="thesis")
+        line.append(text)
+        self.console.print(line)
+
+    def note(self, text: str) -> None:
+        """Narration around a demo turn. Never part of the engine's output."""
+        self.console.print(Padding(Text(text, style="faint"), (0, 0, 0, 2)))
+
+    def rule(self) -> None:
+        self.console.print(Text("─" * min(self.console.width, 70), style="faint"))
+
+    def check(self, name: str, ok: bool, detail: str, fix: str = "") -> None:
+        mark = "[gate]ok  [/gate]" if ok else "[anti]FAIL[/anti]"
+        self.console.print(f"  {mark}  {name:<22}[faint]{detail}[/faint]")
+        if fix:
+            self.console.print(Padding(Text(fix, style="faint"), (0, 0, 0, 10)))
+
     # ── messages ──────────────────────────────────────────────────────
 
     def error(self, message: str) -> None:

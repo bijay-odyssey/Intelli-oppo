@@ -24,7 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-intelli-oppo = "intelli_oppo.__main__:main"
+intelli-oppo = "intelli_oppo.ui.app:main"
 
 [build-system]
 requires = ["setuptools>=68"]

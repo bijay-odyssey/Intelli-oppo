@@ -1,6 +1,6 @@
 import sys
 
-from .ui.cli import main
+from .ui.app import main
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -24,7 +24,12 @@ class Settings:
 
     @classmethod
     def load(cls) -> Settings:
-        load_dotenv(PROJECT_ROOT / ".env")
+        # Working directory first: for a real (non-editable) install PROJECT_ROOT
+        # points into site-packages, where nobody keeps their key.
+        for candidate in (Path.cwd() / ".env", PROJECT_ROOT / ".env"):
+            if candidate.is_file():
+                load_dotenv(candidate)
+                break
 
         token = os.getenv("GROQ_TOKEN", "").strip()
         if not token:
