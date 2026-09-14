@@ -21,13 +21,24 @@ PY="$VENV/bin/python"
 say()  { printf '  %s\n' "$*"; }
 fail() { printf '\n  error: %s\n\n' "$*" >&2; exit 1; }
 
+usable() {
+  "$@" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3,11) else 1)' \
+    >/dev/null 2>&1
+}
+
 find_python() {
-  for candidate in python3.12 python3.13 python3.11 python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3,11) else 1)' 2>/dev/null; then
-        echo "$candidate"
-        return 0
-      fi
+  # `py -3.12` matters on Windows: the launcher routinely knows about an
+  # interpreter that is not on PATH under any name, which is exactly the case
+  # when `python` is an older system install.
+  for candidate in \
+    "py -3.12" "py -3.13" "py -3.11" \
+    python3.12 python3.13 python3.11 python3 python
+  do
+    # Intentionally unquoted: candidates may be two words.
+    # shellcheck disable=SC2086
+    if usable $candidate; then
+      echo "$candidate"
+      return 0
     fi
   done
   return 1
@@ -40,13 +51,21 @@ if [ ! -x "$PY" ]; then
   https://www.python.org/downloads/"
 
   say "creating virtual environment with $BASE_PY"
-  "$BASE_PY" -m venv "$VENV"
+  # Intentionally unquoted: a candidate may be two words, e.g. `py -3.12`.
+  # shellcheck disable=SC2086
+  $BASE_PY -m venv "$VENV"
+
   PY="$VENV/bin/python"
   [ -x "$VENV/Scripts/python.exe" ] && PY="$VENV/Scripts/python.exe"
+  [ -x "$PY" ] || fail "virtual environment was created but has no interpreter at $PY"
 fi
 
 # ── dependencies ──────────────────────────────────────────────────────
-if ! "$PY" -c 'import intelli_oppo' >/dev/null 2>&1; then
+# Probe a third-party dependency, not our own package: `import intelli_oppo`
+# succeeds from the source tree even in an empty venv, because Python puts the
+# working directory on sys.path. That false positive skipped installation
+# entirely and surfaced later as ModuleNotFoundError at runtime.
+if ! "$PY" -c 'import groq, rich, pydantic, dotenv' >/dev/null 2>&1; then
   say "installing dependencies (first run only)"
   "$PY" -m pip install --quiet --upgrade pip
   "$PY" -m pip install --quiet -e ".[dev]"
