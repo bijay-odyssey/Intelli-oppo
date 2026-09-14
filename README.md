@@ -184,7 +184,11 @@ line in a prompt. Each was added after a live run broke it:
 - It may not end up on the side you already hold.
 - A settled fact is never printed as the loser.
 - Two verdicts cannot occupy one scope cell with opposite winners.
-- A rebuttal may not move its scope or switch sides.
+- A rebuttal may not move its scope or switch sides — or change whether it is
+  arguing a position or defending a granted headline.
+- A claim classified settled or tautological may only be attacked with a move
+  that needs no evidence, and that restriction survives a rebuttal or a flip
+  even if the model's own re-classification would have lifted it.
 - A protected claim is granted, and only its argument is disputed.
 
 ## Model routing
@@ -216,7 +220,7 @@ not an error.
 ## Development
 
 ```bash
-./start.sh test     # 81 tests, all offline — no API key needed
+./start.sh test     # 93 tests, all offline — no API key needed
 ruff check .
 ruff format .
 ```
@@ -227,9 +231,20 @@ responses per role, so any routing path is testable without spending a token.
 ## Status
 
 Working, and honest about what it is. The reasoning is a single call with the
-ontology inlined; retrieval, citation checking and the full staged pipeline are
-still ahead. See the [open issues](https://github.com/bijay-odyssey/Intelli-oppo/issues)
-for the roadmap.
+ontology inlined; retrieval and citation checking are still ahead.
+
+That single call is deliberate, not a stopgap. A staged pipeline — separate
+calls for classify / plan / build, so a settled claim never even sees a
+non-formal move — was built and measured live against it: for the same turn it
+cost **60–110% more tokens**, because GPT-OSS pays a fixed hidden-reasoning tax
+per call regardless of how small that call's prompt is, and three calls pays
+it three times. The classification survives as two extra fields on the one
+call instead — `claim_domain` and `decidability` — checked in code exactly the
+same way: a claim classified settled or tautological is rejected and retried
+if any point reaches for a move that needs evidence.
+
+See the [open issues](https://github.com/bijay-odyssey/Intelli-oppo/issues) for
+the roadmap.
 
 ## Contributing
 

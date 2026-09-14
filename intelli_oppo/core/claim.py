@@ -118,6 +118,43 @@ class ClaimShape(StrEnum):
     """A single proposition. Oppose the argument, not the proposition."""
 
 
+class ClaimDomain(StrEnum):
+    """What kind of claim this is. Informs which moves plausibly apply —
+    mechanism_attack wants a causal claim, reference_class_swap wants an
+    empirical or predictive one."""
+
+    EMPIRICAL = "empirical"
+    MATHEMATICAL = "mathematical"
+    NORMATIVE = "normative"
+    CAUSAL = "causal"
+    PREDICTIVE = "predictive"
+
+
+class Decidability(StrEnum):
+    """Whether there is genuine room to oppose the claim's content, as
+    against the argument for it.
+
+    This is what makes "argue the argument, not the fact" mechanical instead
+    of a matter of the model noticing on its own. When a claim is settled or
+    tautological, the engine requires every point to use a move from
+    `core.moves.FORMAL_MOVES` — checked in code, not left to the model to
+    remember unprompted.
+    """
+
+    SETTLED = "settled"
+    """A verified fact. Denying it would be false, not clever."""
+
+    CONTESTED = "contested"
+    """Reasonable people actually disagree; evidence exists on more than one
+    side."""
+
+    VALUE_LADEN = "value_laden"
+    """Depends on values or preference. No amount of evidence settles it."""
+
+    TAUTOLOGICAL = "tautological"
+    """True by definition or structure. Carries no information."""
+
+
 class TurnKind(StrEnum):
     """What the user just did. Decided before any expensive call runs."""
 

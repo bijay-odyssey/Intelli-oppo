@@ -6,7 +6,16 @@ Every case here corresponds to something a live run actually produced.
 import pytest
 
 from intelli_oppo.config import Settings
-from intelli_oppo.core import ClaimShape, Horizon, MetricKind, MoveId, Pivot
+from intelli_oppo.core import (
+    ClaimDomain,
+    ClaimShape,
+    Decidability,
+    Horizon,
+    MetricKind,
+    MoveId,
+    Pivot,
+)
+from intelli_oppo.core.moves import FORMAL_MOVES
 from intelli_oppo.llm.provider import LLMProvider
 from intelli_oppo.reason import PROTECTED_MOVES, protected_fault
 from intelli_oppo.reason.engine import OppositionEngine, PointOut, VerdictOut
@@ -29,6 +38,8 @@ def out(**overrides) -> VerdictOut:
     base = dict(
         shape=ClaimShape.COMPARATIVE,
         user_favors="monolith",
+        claim_domain=ClaimDomain.EMPIRICAL,
+        decidability=Decidability.CONTESTED,
         granted="",
         position="",
         winner="microservices",
@@ -87,10 +98,110 @@ def test_assertion_with_position_passes_without_subjects(engine):
         shape=ClaimShape.ASSERTION,
         winner="",
         loser="",
+        decidability=Decidability.SETTLED,
         granted="2 + 2 = 4",
         position="Not disputing that. Disputing that your argument earns it.",
+        points=[PointOut(move=MoveId.VACUITY_ATTACK, text="true but does no work")],
     )
     assert engine.fault(verdict, must_not_back="") is None
+
+
+# ── decidability-gated move eligibility ────────────────────────────────
+# Issue #1 asked for a staged pipeline (separate classify/plan/build calls) so
+# that "the engine cannot argue against settled science." Measured live, that
+# split cost 60-110% more tokens per turn than one call, because each
+# GPT-OSS reasoning call pays a fixed hidden-thinking tax regardless of prompt
+# size, and three calls pays it three times. The classification survives as
+# two extra fields on the SAME call; these tests are what issue #1 actually
+# wanted, delivered without the extra calls.
+
+
+def test_settled_claim_may_only_use_formal_moves(engine):
+    verdict = out(
+        shape=ClaimShape.ASSERTION,
+        winner="",
+        loser="",
+        decidability=Decidability.SETTLED,
+        granted="the earth orbits the sun",
+        position="Granted, and it settles nothing you need.",
+        points=[PointOut(move=MoveId.REFERENCE_CLASS_SWAP, text="wrong population")],
+    )
+    fault = engine.fault(verdict, must_not_back="")
+    assert fault is not None
+    assert "reference_class_swap" in fault
+
+
+def test_tautological_claim_is_restricted_the_same_way(engine):
+    verdict = out(
+        shape=ClaimShape.ASSERTION,
+        winner="",
+        loser="",
+        decidability=Decidability.TAUTOLOGICAL,
+        granted="it will rain or it will not",
+        position="True, and empty.",
+        points=[PointOut(move=MoveId.COUNTEREXAMPLE, text="not universal")],
+    )
+    fault = engine.fault(verdict, must_not_back="")
+    assert fault is not None
+    assert "counterexample" in fault
+
+
+def test_settled_claim_using_only_formal_moves_passes(engine):
+    verdict = out(
+        shape=ClaimShape.ASSERTION,
+        winner="",
+        loser="",
+        decidability=Decidability.SETTLED,
+        granted="the earth orbits the sun",
+        position="Granted, and it settles nothing you need.",
+        points=[
+            PointOut(move=MoveId.VACUITY_ATTACK, text="true but does no work"),
+            PointOut(move=MoveId.FORMAL_DEFEAT, text="no premises offered"),
+        ],
+    )
+    assert engine.fault(verdict, must_not_back="") is None
+
+
+def test_contested_claim_is_not_restricted(engine):
+    """Only settled/tautological gates move choice; ordinary disagreement
+    keeps the whole catalogue available."""
+    verdict = out(decidability=Decidability.CONTESTED)
+    assert engine.fault(verdict, must_not_back="monolith") is None
+
+
+def test_settled_comparative_claim_is_restricted_too(engine):
+    """The gate is not conditional on shape -- a comparative claim classified
+    settled is just as restricted as an assertion classified settled."""
+    verdict = out(
+        decidability=Decidability.SETTLED,
+        points=[PointOut(move=MoveId.MECHANISM_ATTACK, text="wrong cause")],
+    )
+    fault = engine.fault(verdict, must_not_back="monolith")
+    assert fault is not None
+    assert "mechanism_attack" in fault
+
+
+def test_force_formal_overrides_a_freshly_claimed_contested(engine):
+    """force_formal is how a rebuttal or a flip stays restricted even if this
+    call's own decidability says the claim somehow became contested --
+    closing the loophole where a settled claim is 'laundered' into a
+    debatable one under a counter-argument or a flip."""
+    verdict = out(
+        decidability=Decidability.CONTESTED,
+        points=[
+            PointOut(move=MoveId.PRECEDENT_INVERSION, text="that case cuts the other way")
+        ],
+    )
+    assert engine.fault(verdict, must_not_back="monolith") is None
+    fault = engine.fault(verdict, must_not_back="monolith", force_formal=True)
+    assert fault is not None
+    assert "precedent_inversion" in fault
+
+
+def test_all_formal_moves_are_accepted_under_restriction(engine):
+    points = [PointOut(move=m, text="x") for m in FORMAL_MOVES]
+    verdict = out(decidability=Decidability.SETTLED, points=points[:3])
+    assert engine.fault(verdict, must_not_back="monolith") is None
 
 
 # ── protected propositions ────────────────────────────────────────────

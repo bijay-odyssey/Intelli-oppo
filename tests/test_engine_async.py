@@ -21,6 +21,8 @@ def verdict_payload(**overrides) -> dict:
     base = {
         "shape": "comparative",
         "user_favors": "monolith",
+        "claim_domain": "empirical",
+        "decidability": "contested",
         "granted": "",
         "position": "",
         "winner": "microservices",
@@ -514,3 +516,193 @@ async def test_rebuttal_recovers_on_the_second_corrective_round():
 
     assert reply.turn.verdict.scope.metric_kind is MetricKind.SPEED
     assert provider.count(Role.REASONING) == 4
+
+
+# ── decidability-gated eligibility, live through the full engine ──────
+# Unit-level coverage lives in test_engine_guards.py; these exercise the same
+# gate through respond()/_rebut()/concede() so the retry-and-raise wiring is
+# covered too, not just the fault() function in isolation.
+
+
+async def test_oppose_retries_when_settled_claim_uses_a_forbidden_move():
+    bad = verdict_payload(
+        shape="assertion",
+        winner="",
+        loser="",
+        decidability="settled",
+        granted="the earth orbits the sun",
+        position="granted, and empty",
+        points=[{"move": "reference_class_swap", "text": "wrong population"}],
+    )
+    good = verdict_payload(
+        shape="assertion",
+        winner="",
+        loser="",
+        decidability="settled",
+        granted="the earth orbits the sun",
+        position="granted, and empty",
+        points=[{"move": "vacuity_attack", "text": "true but does no work"}],
+    )
+    engine, provider = build({**BASE, Role.REASONING: [bad, good]})
+    reply = await engine.respond("The earth orbits the sun.")
+
+    assert provider.count(Role.REASONING) == 2
+    assert reply.turn.verdict.points[0].move.value == "vacuity_attack"
+    assert "settled/tautological" in provider.calls[-1][1]
+
+
+async def test_oppose_raises_when_settled_claim_never_corrects():
+    bad = verdict_payload(
+        shape="assertion",
+        winner="",
+        loser="",
+        decidability="settled",
+        granted="x",
+        position="y",
+        points=[{"move": "mechanism_attack", "text": "wrong cause"}],
+    )
+    engine, _ = build({**BASE, Role.REASONING: [bad]})
+    with pytest.raises(LLMError, match="settled/tautological"):
+        await engine.respond("The earth orbits the sun.")
+
+
+async def test_rebuttal_cannot_launder_a_settled_claim_into_contested():
+    """force_formal must win even when the rebuttal's own `decidability` field
+    claims the claim somehow became contested under pressure. The first turn
+    must itself be meta (settled) for `is_meta` to gate the rebuttal."""
+    engine, provider = build(
+        {
+            Role.SAFEGUARD: [guard_payload()],
+            Role.UTILITY: [label(), label("counter", "pushes back")],
+            Role.REASONING: [
+                verdict_payload(
+                    shape="assertion",
+                    winner="",
+                    loser="",
+                    decidability="settled",
+                    granted="the earth orbits the sun",
+                    position="granted, empty",
+                    points=[{"move": "vacuity_attack", "text": "true but empty"}],
+                ),
+                verdict_payload(
+                    shape="assertion",
+                    winner="",
+                    loser="",
+                    decidability="contested",  # the laundering attempt
+                    granted="",
+                    position="still granted",
+                    points=[{"move": "counterexample", "text": "here is one"}],
+                ),
+                verdict_payload(
+                    shape="assertion",
+                    winner="",
+                    loser="",
+                    decidability="settled",
+                    granted="the earth orbits the sun",
+                    position="still granted",
+                    points=[{"move": "formal_defeat", "text": "no premises offered"}],
+                ),
+            ],
+        }
+    )
+    await engine.respond("The earth orbits the sun.")
+    reply = await engine.respond("No it doesn't, geocentrism works fine.")
+
+    assert provider.count(Role.REASONING) == 3, "claim + laundering attempt + retry"
+    assert reply.turn.verdict.points[0].move.value == "formal_defeat"
+    rejections = [
+        u for _, u in provider.calls if "Your previous answer was rejected" in u
+    ]
+    assert "settled/tautological" in rejections[-1]
+
+
+async def test_rebuttal_shape_drift_is_rejected():
+    """held was meta-opposition (no winner/loser); the rebuttal tried to
+    become a comparative claim instead of continuing to defend the headline."""
+    engine, provider = build(
+        {
+            Role.SAFEGUARD: [guard_payload()],
+            Role.UTILITY: [label(), label("counter", "pushes back")],
+            Role.REASONING: [
+                verdict_payload(
+                    shape="assertion",
+                    winner="",
+                    loser="",
+                    decidability="settled",
+                    granted="2 + 2 = 4",
+                    position="granted, empty",
+                    points=[{"move": "vacuity_attack", "text": "true but empty"}],
+                ),
+                verdict_payload(
+                    shape="comparative",  # drift: should have stayed assertion
+                    winner="addition",
+                    loser="subtraction",
+                    decidability="settled",
+                ),
+                verdict_payload(
+                    shape="assertion",
+                    winner="",
+                    loser="",
+                    decidability="settled",
+                    granted="2 + 2 = 4",
+                    position="still granted, still empty",
+                    points=[{"move": "formal_defeat", "text": "no premises offered"}],
+                ),
+            ],
+        }
+    )
+    await engine.respond("2 + 2 = 4.")
+    reply = await engine.respond("No, it matters for cryptography.")
+
+    assert provider.count(Role.REASONING) == 3
+    assert reply.turn.verdict.is_meta
+    rejections = [
+        u for _, u in provider.calls if "Your previous answer was rejected" in u
+    ]
+    assert "shape must match" in rejections[-1]
+
+
+async def test_concede_inherits_the_formal_restriction_from_a_settled_turn():
+    """Flipping away from a settled/tautological claim does not unlock the
+    evidence-hungry moves either."""
+    engine, provider = build(
+        {
+            Role.SAFEGUARD: [guard_payload()],
+            Role.UTILITY: [label(), label("concession", "user agrees")],
+            Role.REASONING: [
+                verdict_payload(
+                    shape="assertion",
+                    winner="",
+                    loser="",
+                    decidability="settled",
+                    granted="2 + 2 = 4",
+                    position="granted, empty",
+                    points=[{"move": "vacuity_attack", "text": "true but empty"}],
+                ),
+                verdict_payload(  # the flip tries to reach past formal moves
+                    shape="assertion",
+                    winner="",
+                    loser="",
+                    decidability="contested",
+                    position="now it matters",
+                    points=[{"move": "reference_class_swap", "text": "wrong sample"}],
+                    pivot="premise_consequence",
+                ),
+                verdict_payload(
+                    shape="assertion",
+                    winner="",
+                    loser="",
+                    decidability="settled",
+                    granted="2 + 2 = 4",
+                    position="corrected",
+                    points=[{"move": "burden_asymmetry", "text": "burden shifts"}],
+                    pivot="premise_consequence",
+                ),
+            ],
+        }
+    )
+    await engine.respond("2 + 2 = 4.")
+    reply = await engine.respond("ok fair enough, you win")
+
+    assert provider.count(Role.REASONING) == 3
+    assert reply.turn.verdict.points[0].move.value == "burden_asymmetry"

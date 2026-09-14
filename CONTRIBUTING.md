@@ -64,7 +64,7 @@ A free key from [console.groq.com/keys](https://console.groq.com/keys) is enough
 to run everything.
 
 ```bash
-./start.sh test     # 81 tests, all offline — no key needed
+./start.sh test     # 93 tests, all offline — no key needed
 ruff check .
 ruff format .
 python -m intelli_oppo
@@ -97,9 +97,20 @@ The Groq free tier allows **8,000 tokens per minute**. A turn costs roughly 3k.
 Groq queues rather than rejecting, so an exhausted budget shows up as a 3-second
 turn becoming 25 seconds rather than as an error.
 
-This has real design consequences. The move catalogue is re-sent on every
-reasoning call and is about 40% of the system prompt, so wordiness there is paid
-for on every single turn. Before adding to a prompt, check what it costs:
+**The number of calls matters more than the size of any one of them.** GPT-OSS
+models spend part of every completion on hidden reasoning before the visible
+answer, and that tax is paid per call, close to independent of prompt size. A
+staged pipeline (separate classify / plan / build calls) was built and measured
+live against the single call this engine actually uses: it cost 60–110% more
+tokens for the same turn, because three reasoning-capable calls pay that tax
+three times. Splitting a call to shrink its prompt is not a saving if it adds
+a call — measure total tokens across the whole exchange, not the size of the
+prompt you're trying to trim. `intelli_oppo/reason/engine.py`'s module
+docstring has the numbers.
+
+The move catalogue is re-sent on every reasoning call and is about 40% of the
+system prompt, so wordiness there is paid for on every single turn. Before
+adding to a prompt, check what it costs:
 
 ```python
 from intelli_oppo.reason import prompts
@@ -107,9 +118,13 @@ from intelli_oppo.reason import prompts
 print(len(prompts.SYSTEM))
 ```
 
-Cheap work belongs on `Role.UTILITY`. Turn classification runs there and
-short-circuits small talk entirely, which is why adding it *lowered* average
-cost per turn.
+Cheap work belongs on `Role.UTILITY` *and* on the existing call, where
+possible — turn classification runs on its own call there and short-circuits
+small talk entirely, which is why adding it lowered average cost per turn. But
+before adding a new call, check whether the same information can instead be a
+field on a call that already exists; `VerdictOut.claim_domain` and
+`.decidability` are exactly that trade, made after the separate-call version
+was measured and rejected.
 
 ## Adding an opposition move
 
@@ -139,7 +154,7 @@ updating too.
 ## Good places to start
 
 Issues tagged `good first issue` are scoped to be self-contained. Beyond those,
-the roadmap issues (#1 to #5) are each a phase of the design, and each has a
+the roadmap issues (#2 to #5) are each a phase of the design, and each has a
 checklist you can take one item from.
 
 If you want to add a model provider — Gemini, OpenAI, a local Ollama — that is a
