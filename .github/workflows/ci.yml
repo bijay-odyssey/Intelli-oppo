@@ -18,3 +18,21 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest -q
+
+  bootstrap:
+    # Three launcher bugs shipped because CI installed dependencies itself and
+    # never ran start.sh. This runs it the way a new contributor does: clean
+    # checkout, no venv, no .env, no API key.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: start.sh bootstraps a clean checkout
+        run: ./start.sh test
+      - name: start.sh setup is idempotent
+        run: ./start.sh setup
+      - name: modes that need no key do not demand one
+        run: |
+          test ! -f .env || { echo "start.sh test should not create .env"; exit 1; }

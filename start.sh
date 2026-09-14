@@ -71,24 +71,30 @@ if ! "$PY" -c 'import groq, rich, pydantic, dotenv' >/dev/null 2>&1; then
   "$PY" -m pip install --quiet -e ".[dev]"
 fi
 
-# ── key ───────────────────────────────────────────────────────────────
-if [ ! -f .env ]; then
-  cp .env.example .env
-  printf '\n  created .env — add your Groq key, then run this again\n'
-  printf '  free key: https://console.groq.com/keys\n\n'
-  exit 1
-fi
-
-if ! grep -qE '^GROQ_TOKEN=.+' .env; then
-  printf '\n  .env has no GROQ_TOKEN — add one, then run this again\n'
-  printf '  free key: https://console.groq.com/keys\n\n'
-  exit 1
-fi
-
-# ── run ───────────────────────────────────────────────────────────────
 MODE="${1:-run}"
 shift || true
 
+# ── key ───────────────────────────────────────────────────────────────
+# Only the modes that actually talk to the API. The whole test suite is
+# offline, and `check` exists precisely to diagnose a missing key, so
+# demanding one from either would be backwards.
+case "$MODE" in
+  run|demo|ask)
+    if [ ! -f .env ]; then
+      cp .env.example .env
+      printf '\n  created .env — add your Groq key, then run this again\n'
+      printf '  free key: https://console.groq.com/keys\n\n'
+      exit 1
+    fi
+    if ! grep -qE '^GROQ_TOKEN=.+' .env; then
+      printf '\n  .env has no GROQ_TOKEN — add one, then run this again\n'
+      printf '  free key: https://console.groq.com/keys\n\n'
+      exit 1
+    fi
+    ;;
+esac
+
+# ── run ───────────────────────────────────────────────────────────────
 case "$MODE" in
   run)   exec "$PY" -m intelli_oppo "$@" ;;
   demo)  exec "$PY" -m intelli_oppo --demo "$@" ;;
