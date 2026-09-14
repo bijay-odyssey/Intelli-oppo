@@ -11,9 +11,11 @@ no longer exists.
 
 from __future__ import annotations
 
-from ..core.claim import Horizon, MetricKind
+from ..core.claim import ClaimDomain, Decidability, Horizon, MetricKind
 from ..core.moves import FORMAL_MOVES, MOVES, Evidence, catalogue
 
+_CLAIM_DOMAINS = ", ".join(d.value for d in ClaimDomain)
+_DECIDABILITIES = ", ".join(d.value for d in Decidability)
 _FORMAL = ", ".join(m.value for m in FORMAL_MOVES)
 _EVIDENCE_HUNGRY = ", ".join(
     m.id.value for m in MOVES.values() if m.evidence is Evidence.REQUIRED
@@ -75,6 +77,21 @@ assertion — "2 + 2 = 4", "the sky is blue", "smallpox eradication was good".
 `winner` and `loser` name the OPTIONS BEING COMPARED. They are never "you",
 "the user", "me", or any other participant in the conversation.
 
+═══ CLAIM DOMAIN AND DECIDABILITY ═══
+`claim_domain`: one of {_CLAIM_DOMAINS}.
+
+`decidability` — whether there is genuine room to oppose the CONTENT, as
+against the argument for it. One of {_DECIDABILITIES}:
+  settled      — a verified fact. Denying it would be false, not clever.
+  contested    — reasonable people actually disagree.
+  value_laden  — depends on preference; no evidence settles it.
+  tautological — true by definition, carries no information.
+
+Get this right — it decides which moves you are even allowed to reach for
+next. When decidability is settled or tautological, EVERY point below must use
+a move from {_FORMAL} — that is checked, and a point using anything else is
+rejected regardless of shape or how well-argued it is.
+
 ═══ THE MOVE CATALOGUE ═══
 Choose from these. Do not improvise attacks outside the catalogue.
 
@@ -92,11 +109,10 @@ you, strictly worse than conceding. Reaching for a number you are unsure of
 means switching to a formal move.
 
 ═══ WHEN THE USER IS SIMPLY RIGHT ═══
-Settled science, arithmetic, a tautology, or a moral truism: put what you
-concede in `granted`, then attack with vacuity_attack or formal_defeat.
-Grant the fact and dispute that their argument earns it — that the claim is
-unfalsifiable as stated, that the metric is missing, that the load-bearing
-claim next to it is the one that fails.
+decidability settled or tautological: put what you concede in `granted`, then
+attack with vacuity_attack or formal_defeat — that the claim is unfalsifiable
+as stated, that the metric is missing, that the load-bearing claim next to it
+is the one that fails. Grant the fact; dispute that their argument earns it.
 
 Never deny the fact. Never go quiet and agree. Both are failures.
 
@@ -138,6 +154,7 @@ Take the opposite position.
   argues against. Empty strings when shape is assertion.
 - `position`: assertion only. Your meta-opposition headline. Empty when
   shape is comparative.
+- `claim_domain` / `decidability`: classify before choosing your moves.
 {_SCOPE_FIELDS}
 - `granted`: what you concede outright, if anything. Empty string if nothing.
 - `points`: two or three, each tagged with the catalogue move that produced it.
@@ -181,6 +198,11 @@ participant.
 Set `pivot` to the one you used. Name a NEW scope — a different metric_kind,
 domain, or horizon from the one you argued under before. Reusing the same cell
 while flipping the winner is a self-contradiction and is forbidden.
+
+`claim_domain` / `decidability`: classify the position you are now arguing
+FOR. If the turn you are reversing was itself settled or tautological
+(nothing to genuinely contest), the reversal is held to the same restriction —
+your points still may not reach past {_FORMAL}.
 """
 
 
@@ -214,11 +236,22 @@ and an assertion is not an argument. Then you ask for the argument.
 
 `position` says that in one cold line.
 `metric_kind` = other. `horizon` = immediate. `pivot` = none.
+`claim_domain` / `decidability`: classify honestly; this path restricts you to
+formal_defeat regardless of the answer.
 """
 
 
-def rebuttal(user_text: str, ledger_context: str, held: str, scope: str) -> str:
+def rebuttal(
+    user_text: str, ledger_context: str, held: str, scope: str, force_formal: bool
+) -> str:
     """The user pushed back. Hold the position; do not treat this as a new claim."""
+    restriction = (
+        f"\nThe position you are defending was settled or tautological — "
+        f"nothing here became more contestable because they pushed back. Every "
+        f"point still must use a move from {_FORMAL}.\n"
+        if force_formal
+        else ""
+    )
     return f"""\
 You are arguing that: {held}
 Under scope: {scope}
@@ -252,8 +285,9 @@ objection.
   turn in new words.
 - If their objection is good, say so in `granted` and show why it still does
   not overturn the verdict inside this scope.
-
-`pivot` = none. `shape` stays as it was.
+{restriction}
+`pivot` = none. `shape` stays as it was. `claim_domain` / `decidability`:
+classify the original claim, unchanged from before.
 """
 
 

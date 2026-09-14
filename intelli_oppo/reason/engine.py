@@ -1,4 +1,4 @@
-"""The Phase 0 opposition engine.
+"""The opposition engine.
 
 One reasoning call with the ontology inlined, then a set of checks enforced in
 code rather than requested in a prompt:
@@ -6,13 +6,22 @@ code rather than requested in a prompt:
 * the safety gate — some claims are not debating material
 * the opposition invariant — the engine may not end up on the user's side
 * Invariant I — a settled fact is never printed as the loser
+* decidability-gated moves — a settled or tautological claim may only be
+  attacked with the moves that need no evidence and touch no fact
 * the output budget — a word cap asked for in a prompt is a suggestion
 
 Every one of these was added after a live run broke it. Prompt text alone held
 none of them.
 
-Phase 1 replaces the single call with the staged pipeline; these guards survive
-that change unaltered.
+A staged pipeline (separate calls for classify / plan / build) was tried and
+measured live against this single call: it cost 60-110% MORE tokens for the
+same turn, because each of GPT-OSS's reasoning-capable calls pays a fixed
+"hidden thinking" tax in completion tokens regardless of how small its prompt
+is — three calls means paying that tax three times. Splitting the call did not
+survive contact with the actual cost model, so it stays one call; see the note
+on issue #1 for the numbers. What issue #1 asked for structurally — a
+classification that gates which moves are legitimately available — is
+delivered here as extra fields on the same call instead.
 """
 
 from __future__ import annotations
@@ -23,7 +32,9 @@ from pydantic import BaseModel, Field
 
 from ..config import Settings
 from ..core.claim import (
+    ClaimDomain,
     ClaimShape,
+    Decidability,
     Horizon,
     MetricKind,
     Pivot,
@@ -35,7 +46,7 @@ from ..core.claim import (
     Verdict,
 )
 from ..core.ledger import Ledger
-from ..core.moves import MoveId
+from ..core.moves import FORMAL_MOVES, MoveId
 from ..llm.provider import LLMError, LLMProvider, Role
 from . import prompts
 from .classify import classify
@@ -79,6 +90,8 @@ class PointOut(BaseModel):
 class VerdictOut(BaseModel):
     shape: ClaimShape
     user_favors: str = Field(description="What the user is backing, 1-2 words")
+    claim_domain: ClaimDomain
+    decidability: Decidability
     granted: str = Field(description="What you concede outright; empty if nothing")
     position: str = Field(description="Headline when shape is assertion; else empty")
     winner: str = Field(description="Option you back; empty when shape is assertion")
@@ -171,9 +184,12 @@ class OppositionEngine:
             self.ledger.context_for_prompt(),
             held,
             last.scope.render(),
+            force_formal=last.is_meta,
         )
         out = await self._ask(prompt)
-        out = await self._repair(out, prompt, must_not_back=out.user_favors)
+        out = await self._repair(
+            out, prompt, must_not_back=out.user_favors, force_formal=last.is_meta
+        )
         out = await self._hold_ground(out, prompt, last)
         verdict = await self._to_verdict(out)
 
@@ -232,7 +248,9 @@ class OppositionEngine:
         held = last.winner or last.position
         prompt = prompts.concession(self.ledger.context_for_prompt(), held)
         out = await self._ask(prompt)
-        out = await self._repair(out, prompt, must_not_back=held)
+        out = await self._repair(
+            out, prompt, must_not_back=held, force_formal=last.is_meta
+        )
         verdict = await self._to_verdict(out)
 
         turn = Turn(
@@ -256,6 +274,13 @@ class OppositionEngine:
         pressure is exactly the cheap trick Invariant II exists to prevent, and
         it is the most tempting move available when a counter lands.
         """
+        if held.is_meta != (out.shape is ClaimShape.ASSERTION):
+            return (
+                "shape must match the claim you are defending — it does not "
+                "become comparative or stop being comparative because you were "
+                "pushed back on. `shape` stays as it was."
+            )
+
         moved = Scope(
             metric_kind=out.metric_kind,
             metric=out.metric,
@@ -292,18 +317,45 @@ class OppositionEngine:
             raise LLMError(f"could not hold position: {still}")
         return out
 
-    def fault(self, out: VerdictOut, must_not_back: str) -> str | None:
+    def fault(
+        self, out: VerdictOut, must_not_back: str, force_formal: bool = False
+    ) -> str | None:
         """Why this verdict is unusable, or None if it is fine.
 
         These are the invariants that cannot be left to the prompt. The
         assertion branch in particular is what stops the engine printing the
         negation of a settled fact as its headline.
+
+        `force_formal` overrides whatever this call's own `decidability` says:
+        a rebuttal or a flip is told to defend or reverse a claim already
+        classified settled/tautological on an earlier turn, and the model
+        re-deriving "actually, now that I look again, this is contested" mid
+        rebuttal would be a way to launder past the restriction rather than
+        argue past it.
         """
+        restricted = force_formal or out.decidability in (
+            Decidability.SETTLED,
+            Decidability.TAUTOLOGICAL,
+        )
+        if restricted:
+            bad = [p.move.value for p in out.points if p.move not in FORMAL_MOVES]
+            if bad:
+                return (
+                    f"decidability is settled/tautological, so every point must use "
+                    f"a move from {', '.join(m.value for m in FORMAL_MOVES)}. "
+                    f"{', '.join(bad)} did not."
+                )
+
         if out.shape is ClaimShape.ASSERTION:
             if not out.position.strip():
                 return (
                     "shape is 'assertion', so `position` must carry the headline. "
                     "It was empty."
+                )
+            if restricted and not out.granted.strip():
+                return (
+                    "decidability is settled/tautological, so `granted` must name "
+                    "what you concede. It was empty."
                 )
             return None
 
@@ -331,10 +383,14 @@ class OppositionEngine:
         return protected_fault(out.points, out.challenge, out.granted)
 
     async def _repair(
-        self, out: VerdictOut, prompt: str, must_not_back: str
+        self,
+        out: VerdictOut,
+        prompt: str,
+        must_not_back: str,
+        force_formal: bool = False,
     ) -> VerdictOut:
         """One corrective round-trip; the model fixes these reliably when told."""
-        problem = self.fault(out, must_not_back)
+        problem = self.fault(out, must_not_back, force_formal)
         if problem is None:
             return out
 
@@ -342,7 +398,7 @@ class OppositionEngine:
             f"{prompt}\n\nYour previous answer was rejected: {problem}\n"
             f"Correct it and return the whole verdict again."
         )
-        if (still := self.fault(retry, must_not_back)) is not None:
+        if (still := self.fault(retry, must_not_back, force_formal)) is not None:
             raise LLMError(f"could not produce a usable verdict: {still}")
         return retry
 
