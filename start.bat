@@ -37,7 +37,9 @@ if not exist "%PY%" (
 )
 
 rem -- dependencies -----------------------------------------------------
-"%PY%" -c "import intelli_oppo" >nul 2>&1
+rem Probe a third-party dependency, not our own package: importing
+rem intelli_oppo succeeds from the source tree even in an empty venv.
+"%PY%" -c "import groq, rich, pydantic, dotenv" >nul 2>&1
 if errorlevel 1 (
     echo   installing dependencies ^(first run only^)
     "%PY%" -m pip install --quiet --upgrade pip
