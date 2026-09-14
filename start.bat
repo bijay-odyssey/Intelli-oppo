@@ -50,29 +50,38 @@ if errorlevel 1 (
     )
 )
 
-rem -- key --------------------------------------------------------------
-if not exist ".env" (
-    copy ".env.example" ".env" >nul
-    echo.
-    echo   created .env - add your Groq key, then run this again
-    echo   free key: https://console.groq.com/keys
-    echo.
-    exit /b 1
-)
-
-findstr /r /c:"^GROQ_TOKEN=..*" ".env" >nul 2>&1
-if errorlevel 1 (
-    echo.
-    echo   .env has no GROQ_TOKEN - add one, then run this again
-    echo   free key: https://console.groq.com/keys
-    echo.
-    exit /b 1
-)
-
 rem -- run --------------------------------------------------------------
 set "MODE=%~1"
 if "%MODE%"=="" set "MODE=run"
 if not "%MODE%"=="" shift
+
+rem -- key --------------------------------------------------------------
+rem Only the modes that actually talk to the API. The test suite is offline,
+rem and `check` exists precisely to diagnose a missing key, so demanding one
+rem from either would be backwards.
+set "NEEDS_KEY="
+if /i "%MODE%"=="run"  set "NEEDS_KEY=1"
+if /i "%MODE%"=="demo" set "NEEDS_KEY=1"
+if /i "%MODE%"=="ask"  set "NEEDS_KEY=1"
+
+if defined NEEDS_KEY (
+    if not exist ".env" (
+        copy ".env.example" ".env" >nul
+        echo.
+        echo   created .env - add your Groq key, then run this again
+        echo   free key: https://console.groq.com/keys
+        echo.
+        exit /b 1
+    )
+    findstr /r /c:"^GROQ_TOKEN=..*" ".env" >nul 2>&1
+    if errorlevel 1 (
+        echo.
+        echo   .env has no GROQ_TOKEN - add one, then run this again
+        echo   free key: https://console.groq.com/keys
+        echo.
+        exit /b 1
+    )
+)
 
 if /i "%MODE%"=="run"   goto :run
 if /i "%MODE%"=="demo"  goto :demo
